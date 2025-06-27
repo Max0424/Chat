@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Secure Chat</title>
+  <style>
+    * {
+    box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #111;
+      font-family: sans-serif;
+      color: #eee;
+    }
+
+    body {
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      background: #111;
+      font-family: sans-serif;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    #messages {
+      flex: 1;
+      width: 100%;
+      max-width: 600px;
+      padding: 10px;
+      margin-top: 10px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+
+    }
+
+    .msg {
+      display: inline-block;
+      padding: 8px 12px;
+      border-radius: 12px;
+      word-break: break-word;
+      max-width: 80%;
+    }
+
+    .msg.mine {
+      align-self: flex-end;
+      background: #4a90e2;
+      color: white;
+    }
+
+    .msg.theirs {
+      align-self: flex-start;
+      background: #333;
+      color: white;
+    }
+
+    .msg.warning {
+      align-self: center;
+      background: none;
+      color: orange;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .msg.info {
+      align-self: center;
+      background: none;
+      color: #0f0;
+      font-weight: bold;
+      text-align: center;
+    }
+
+
+    #input-area {
+      display: flex;
+      flex-direction: row;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      max-width: 600px;
+      padding: 10px;
+      background: #000;
+      border-top: 1px solid #222;
+      margin-top: auto;
+    }
+
+    #input {
+      flex: 1;
+      max-width: 450px;
+      padding: 10px;
+      font-size: 16px;
+      background: #222;
+      color: #eee;
+      border: none;
+      border-radius: 4px;
+      outline: none;
+      resize: none;
+      overflow-y: auto;
+      min-height: 40px;
+      max-height: 120px;
+      line-height: 1.4;
+      font-family: inherit;
+    }
+
+    #sendBtn {
+      margin-left: 10px;
+      padding: 10px 16px;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    #sendBtn:hover {
+      background: #555;
+    }
+
+    #top-bar {
+      width: 100%;
+      max-width: 600px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      background: #111;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    #user-info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #222;
+      padding: 6px 12px;
+      border-radius: 30px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.3);
+      z-index: 1000;
+    }
+
+    #profile-pic {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid #444;
+    }
+
+    #user-label {
+      color: #eee;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    #content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      flex: 1;
+    }
+
+    #typing-dots::after {
+      content: '';
+      display: inline-block;
+      width: 1em;
+      animation: typingDots 1s steps(3, end) infinite;
+    }
+
+    @keyframes typingDots {
+      0%   { content: ''; }
+      33%  { content: '.'; }
+      66%  { content: '..'; }
+      100% { content: '...'; }
+    }
+
+  </style>
+</head>
+<body>
+<div id="top-bar">
+  <div id="user-info">
+    <img src="img/user.png" alt="Profile" id="profile-pic">
+    <div style="display: flex; flex-direction: column;">
+      <span id="user-label">GUEST</span>
+      <span id="status-badge" style="font-size: 12px; color: red;">Offline</span>
+    </div>
+  </div>
+</div>
+
+
+<div id="content">
+  <div id="messages"></div>
+
+  <div id="typing-indicator" style="display:none; margin: 4px 12px; font-size: 14px; color: #aaa;">
+    User is typing<span id="typing-dots"></span>
+  </div>
+
+  <div id="input-area">
+    <textarea id="input" placeholder="Type a message" rows="1"></textarea>
+    <button id="sendBtn">Send</button>
+  </div>
+</div>
+
+</body>
+<script>
+  let socket;
+  let myRole = null;
+  let lastSentPlaintext = "";
+  let cryptoKey;
+  let messages;
+  document.addEventListener("DOMContentLoaded", () => {
+    messages = document.getElementById("messages");
+    const input = document.getElementById("input");
+
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = input.scrollHeight + "px";
+
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send("[TYPING:" + window.userRole + "]");
+      }
+    });
+  });
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const sessionId = urlParams.get("roomId");
+
+  (async function checkRoom() {
+  const response = await fetch("/api/room-exists/" + sessionId);
+  if (response.status === 410) {
+    document.body.innerHTML = "<h2>❌ Room expired or full</h2>";
+    return; // stop script execution
+  }
+
+
+
+  startChat(); // continue with WebSocket setup
+})();
+
+  async function startChat() {
+    socket = new WebSocket((window.location.protocol === "https:" ? "wss" : "ws") +
+      "://" + window.location.host + "/ws/" + sessionId);
+
+    async function decryptMessage(data) {
+      try {
+        const [ivHex, base64] = data.split(":");
+        const iv = new Uint8Array(ivHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+        const encryptedData = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, cryptoKey, encryptedData);
+        return new TextDecoder().decode(decrypted);
+      } catch (e) {
+        console.error("🛑 Decryption failed:", e);
+        return "(decryption failed)";
+      }
+    }
+
+    socket.onclose = function (event) {
+      if (event.code === 1008) {
+        window.location.href = "/connecting.html";
+      }
+    };
+
+    // Register handler *before* deriving key
+    socket.onmessage = async function (event) {
+      const data = event.data;
+
+      // Plaintext system messages
+      if (data.startsWith("[ROLE:")) {
+        const role = data.match(/\[ROLE:(.*?)\]/)?.[1];
+        if (role) {
+          window.userRole = role;
+          const otherRole = (role === "host") ? "GUEST" : "HOST";
+          document.getElementById("user-label").textContent = otherRole;
+
+          const notice = document.createElement("div");
+          notice.className = "msg info";
+          notice.textContent = `🔑 You are the ${role.toUpperCase()}`;
+          messages.appendChild(notice);
+          messages.scrollTop = messages.scrollHeight;
+        }
+        return;
+      }
+      if (data === "[THIRD_USER_ALERT]") {
+        const div = document.createElement("div");
+        div.className = "msg warning";
+        div.textContent = "⚠️ [SECURITY WARNING] Someone attempted to join the chat.";
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+        return;
+      }
+      if (data === "[USER_2_JOINED]") {
+        const div = document.createElement("div");
+        div.className = "msg info";
+        div.textContent = "🔒 Second user has joined.";
+        messages.appendChild(div);
+        messages.scrollTop = messages.scrollHeight;
+
+        if (window.userRole === "host") {
+          document.getElementById("user-label").textContent = "GUEST";
+        } else if (window.userRole === "guest") {
+          document.getElementById("user-label").textContent = "HOST";
+        }
+        return;
+      }
+      if (data === "[PARTNER_ONLINE]") {
+        document.getElementById("status-badge").textContent = "Online";
+        document.getElementById("status-badge").style.color = "lime";
+        return;
+      }
+      if (data === "[PARTNER_OFFLINE]") {
+        document.getElementById("status-badge").textContent = "Offline";
+        document.getElementById("status-badge").style.color = "red";
+        return;
+      }
+
+      if (data.startsWith("[TYPING:")) {
+        const typingUser = data.match(/\[TYPING:(.*?)\]/)[1];
+        if (typingUser !== window.userRole) {
+          const typingIndicator = document.getElementById("typing-indicator");
+          typingIndicator.style.display = "block";
+
+          // Clear previous timeout if exists
+          if (window._typingTimeout) clearTimeout(window._typingTimeout);
+
+          // Hide indicator after 1.5 sec of no typing events from that user
+          window._typingTimeout = setTimeout(() => {
+            typingIndicator.style.display = "none";
+          }, 1500);
+        }
+        return;
+      }
+
+      // Only decrypt if key available
+      if (!cryptoKey) {
+        console.warn("🔐 Key not ready, ignoring message:", data);
+        return;
+      }
+
+      const decrypted = await decryptMessage(data);
+      const div = document.createElement("div");
+      div.className = (decrypted === lastSentPlaintext) ? "msg mine" : "msg theirs";
+      div.innerHTML = decrypted.replace(/\n/g, "<br>");
+
+      if (decrypted === lastSentPlaintext) lastSentPlaintext = "";
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    };
+
+    // Key derivation and Send button binding
+    const encoder = new TextEncoder(), decoder = new TextDecoder();
+    const passphrase = prompt("Enter shared passphrase:");
+    const salt = encoder.encode("chat-session-salt");
+
+
+    const deriveKey = async pass =>
+      crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+        await crypto.subtle.importKey("raw", encoder.encode(pass), "PBKDF2", false, ["deriveKey"]),
+        { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]
+      );
+
+    cryptoKey = await deriveKey(passphrase); // Wait for key
+
+    document.getElementById("sendBtn").addEventListener("click", async () => {
+      const text = document.getElementById("input").value.trim();
+      if (text === "") return;
+      lastSentPlaintext = text;
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const enc = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, cryptoKey, encoder.encode(text));
+      const ivHex = Array.from(iv).map(b => b.toString(16).padStart(2, "0")).join("");
+      const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(enc)));
+      socket.send(ivHex + ":" + dataBase64);
+      document.getElementById("input").value = "";
+      document.getElementById("input").style.height = "40px";
+    });
+  }
+
+</script>
+</body>
+</html>

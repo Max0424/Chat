@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Create Chat Room</title>
+    <style>
+        body { font-family: sans-serif; background: #111; color: #eee; padding: 40px; }
+        button { padding: 10px 20px; font-size: 18px; background: #333; color: #fff; border: none; cursor: pointer; }
+        #link { margin-top: 20px; font-size: 16px; color: #0f0; }
+    </style>
+</head>
+<body>
+<h1>Secure Chat Launcher</h1>
+<button onclick="createRoom()">🔗 Create Secure Chat Room</button>
+<div id="link"></div>
+
+<script>
+    async function createRoom() {
+      try {
+        const res = await fetch("/api/create-room", { method: "POST" });
+        if (!res.ok) throw new Error("Server error: " + res.status);
+        const data = await res.json();
+        console.log("Response JSON:", data);
+
+        const fullUrl = window.location.origin + "/chat/" + data.roomId;
+        document.getElementById("link").innerHTML = `
+          Share this link: <br><a href="${fullUrl}" target="_blank">${fullUrl}</a>
+        `;
+      } catch (err) {
+        console.error("Error creating room:", err);
+        alert("Failed to create room. Check the console for more details.");
+      }
+    }
+</script>
+</body>
+</html>
